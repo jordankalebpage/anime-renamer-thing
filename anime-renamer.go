@@ -1,8 +1,25 @@
-// anime-renamer.go
-// this intention of this program is that renames anime videos and subtitle files
-// so mpv can fuzzy find the subtitles and auto load them.
-// it assumes the videos and subtitles are in the same folder
-package main
+/*
+	anime-renamer.go
+
+The intention of this program is to rename anime videos and
+subtitle files so mpv can find the subtitles and auto load them.
+
+It assumes the videos and subtitles are in the same folder.
+
+Possible video formats: .mkv, .mp4, .avi
+
+Possible subtitle formats: .srt, .ass
+
+The program will try to find the episode number in the following order:
+
+1. S1 - 01
+
+2. S1E01
+
+3. E01
+
+4. 01 or 001 at the end or before space
+*/package main
 
 import (
 	"bufio"
@@ -43,8 +60,8 @@ func main() {
 
 	fmt.Printf("Debug: Using flexible naming convention: %s\n", namingConvention)
 
-	videoFiles := findFiles(folderPath, []string{".mkv", ".mp4", ".avi"}, namingConvention)
-	subtitleFiles := findFiles(folderPath, []string{".srt", ".ass"}, namingConvention)
+	videoFiles := findFiles(folderPath, []string{".mkv", ".mp4", ".avi"})
+	subtitleFiles := findFiles(folderPath, []string{".srt", ".ass"})
 
 	fmt.Printf(
 		"Debug: Found %d video files and %d subtitle files\n",
@@ -78,7 +95,7 @@ func main() {
 		fmt.Println("Renaming cancelled.")
 	}
 
-	fmt.Println("All done :) ありがとうございます！")
+	fmt.Println("All done :) またねー！")
 	fmt.Println("Press enter to exit...")
 	fmt.Scanln()
 }
@@ -97,14 +114,14 @@ func exitWithError(message string) {
 	os.Exit(1)
 }
 
-func findFiles(folderPath string, extensions []string, namingConvention string) []FileInfo {
+func findFiles(folderPath string, extensions []string) []FileInfo {
 	var files []FileInfo
 	extensionSet := make(map[string]bool)
 	for _, ext := range extensions {
 		extensionSet[ext] = true
 	}
 
-	pattern := createFlexiblePattern(namingConvention)
+	pattern := createFlexiblePattern()
 
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -119,12 +136,16 @@ func findFiles(folderPath string, extensions []string, namingConvention string) 
 					fmt.Printf("Debug: Matched file: %s\n", baseName)
 					season, episode := extractSeasonAndEpisode(baseName)
 					fmt.Printf("Debug: Extracted Season: %d, Episode: %d\n", season, episode)
-					files = append(files, FileInfo{
-						Path:      path,
-						Season:    season,
-						Episode:   episode,
-						Extension: ext,
-					})
+					if episode > 0 { // Only add if we found a valid episode number
+						files = append(files, FileInfo{
+							Path:      path,
+							Season:    season,
+							Episode:   episode,
+							Extension: ext,
+						})
+					} else {
+						fmt.Printf("Debug: Skipped file (no valid episode number): %s\n", baseName)
+					}
 				} else {
 					fmt.Printf("Debug: File not matched: %s\n", baseName)
 				}
@@ -144,26 +165,25 @@ func extractSeasonAndEpisode(filename string) (int, int) {
 	seasonStr := ""
 	episodeStr := ""
 
-	// Handle S1 - ## format (for video files)
-	seasonEpisodePattern := regexp.MustCompile(`S(\d+)\s*-\s*(\d+)`)
-	if match := seasonEpisodePattern.FindStringSubmatch(filename); len(match) > 2 {
-		seasonStr = match[1]
-		episodeStr = match[2]
+	// Array of patterns to try
+	patterns := []struct {
+		regex                     *regexp.Regexp
+		seasonIndex, episodeIndex int
+	}{
+		{regexp.MustCompile(`S(\d+)\s*-\s*(\d+)`), 1, 2},  // S1 - 01
+		{regexp.MustCompile(`S(\d+)E(\d+)`), 1, 2},        // S1E01
+		{regexp.MustCompile(`E(\d+)`), 0, 1},              // E01
+		{regexp.MustCompile(`\s-\s(\d+)`), 0, 1},          // - 01
+		{regexp.MustCompile(`\s(\d{2,3})(?:\s|$)`), 0, 1}, // 01 or 001 at the end or before space
 	}
 
-	// Handle E## format (for subtitle files)
-	if episodeStr == "" {
-		episodePattern := regexp.MustCompile(`E(\d+)`)
-		if match := episodePattern.FindStringSubmatch(filename); len(match) > 1 {
-			episodeStr = match[1]
-		}
-	}
-
-	// If still not found, look for standalone numbers at the end
-	if episodeStr == "" {
-		standalonePattern := regexp.MustCompile(`(\d+)(?:\s*\[[A-Fa-f0-9]+\])?$`)
-		if match := standalonePattern.FindStringSubmatch(filename); len(match) > 1 {
-			episodeStr = match[1]
+	for _, pattern := range patterns {
+		if match := pattern.regex.FindStringSubmatch(filename); len(match) > pattern.episodeIndex {
+			if pattern.seasonIndex > 0 {
+				seasonStr = match[pattern.seasonIndex]
+			}
+			episodeStr = match[pattern.episodeIndex]
+			break
 		}
 	}
 
@@ -178,12 +198,8 @@ func extractSeasonAndEpisode(filename string) (int, int) {
 	return season, episode
 }
 
-func createFlexiblePattern(namingConvention string) *regexp.Regexp {
-	patternStr := strings.ReplaceAll(namingConvention, "#", `\d+`)
-	patternStr = strings.ReplaceAll(patternStr, "S", `S?`)
-	patternStr = strings.ReplaceAll(patternStr, "E", `E?`)
-	patternStr = fmt.Sprintf(`(%s|\d+)`, patternStr)
-	return regexp.MustCompile(patternStr)
+func createFlexiblePattern() *regexp.Regexp {
+	return regexp.MustCompile(`\d+`)
 }
 
 func createFilePairs(videoFiles, subtitleFiles []FileInfo) ([]FilePair, []FileInfo) {
