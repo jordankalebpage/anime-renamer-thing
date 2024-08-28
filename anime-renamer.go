@@ -19,7 +19,8 @@ The program will try to find the episode number in the following order:
 3. E01
 
 4. 01 or 001 at the end or before space
-*/package main
+*/
+package main
 
 import (
 	"bufio"
