@@ -104,6 +104,7 @@ func getUserInputLine(prompt string) string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println(prompt)
 	input, _ := reader.ReadString('\n')
+
 	return strings.TrimSpace(input)
 }
 
@@ -111,12 +112,14 @@ func exitWithError(message string) {
 	fmt.Println(message)
 	fmt.Println("Press enter to exit...")
 	fmt.Scanln()
+
 	os.Exit(1)
 }
 
 func findFiles(folderPath string, extensions []string) []FileInfo {
 	var files []FileInfo
 	extensionSet := make(map[string]bool)
+
 	for _, ext := range extensions {
 		extensionSet[ext] = true
 	}
@@ -128,29 +131,38 @@ func findFiles(folderPath string, extensions []string) []FileInfo {
 			fmt.Printf("Error accessing path %q: %v\n", path, err)
 			return nil
 		}
-		if !info.IsDir() {
-			ext := filepath.Ext(path)
-			if extensionSet[ext] {
-				baseName := filepath.Base(path)
-				if pattern.MatchString(baseName) {
-					fmt.Printf("Debug: Matched file: %s\n", baseName)
-					season, episode := extractSeasonAndEpisode(baseName)
-					fmt.Printf("Debug: Extracted Season: %d, Episode: %d\n", season, episode)
-					if episode > 0 { // Only add if we found a valid episode number
-						files = append(files, FileInfo{
-							Path:      path,
-							Season:    season,
-							Episode:   episode,
-							Extension: ext,
-						})
-					} else {
-						fmt.Printf("Debug: Skipped file (no valid episode number): %s\n", baseName)
-					}
-				} else {
-					fmt.Printf("Debug: File not matched: %s\n", baseName)
-				}
-			}
+
+		if info.IsDir() {
+			return nil
 		}
+
+		ext := filepath.Ext(path)
+		if !extensionSet[ext] {
+			return nil
+		}
+
+		baseName := filepath.Base(path)
+		if !pattern.MatchString(baseName) {
+			fmt.Printf("Debug: File not matched: %s\n", baseName)
+			return nil
+		}
+
+		fmt.Printf("Debug: Matched file: %s\n", baseName)
+		season, episode := extractSeasonAndEpisode(baseName)
+		fmt.Printf("Debug: Extracted Season: %d, Episode: %d\n", season, episode)
+
+		if episode == 0 {
+			fmt.Printf("Debug: Skipped file (no valid episode number): %s\n", baseName)
+			return nil
+		}
+
+		files = append(files, FileInfo{
+			Path:      path,
+			Season:    season,
+			Episode:   episode,
+			Extension: ext,
+		})
+
 		return nil
 	})
 
@@ -182,6 +194,7 @@ func extractSeasonAndEpisode(filename string) (int, int) {
 			if pattern.seasonIndex > 0 {
 				seasonStr = match[pattern.seasonIndex]
 			}
+
 			episodeStr = match[pattern.episodeIndex]
 			break
 		}
@@ -214,6 +227,7 @@ func createFilePairs(videoFiles, subtitleFiles []FileInfo) ([]FilePair, []FileIn
 
 	for _, video := range videoFiles {
 		key := video.Season*1000 + video.Episode
+
 		if subtitle, exists := subtitleMap[key]; exists {
 			pairs = append(pairs, FilePair{Video: video, Subtitle: subtitle})
 			delete(subtitleMap, key)
@@ -231,6 +245,7 @@ func createFilePairs(videoFiles, subtitleFiles []FileInfo) ([]FilePair, []FileIn
 
 func displayPairsAndUnmatched(pairs []FilePair, unmatched []FileInfo) {
 	fmt.Println("\nMatched pairs:")
+
 	for i, pair := range pairs {
 		fmt.Printf(
 			"%d. Video: %s\n   Subtitle: %s\n",
@@ -242,6 +257,7 @@ func displayPairsAndUnmatched(pairs []FilePair, unmatched []FileInfo) {
 
 	if len(unmatched) > 0 {
 		fmt.Println("\nUnmatched files:")
+
 		for i, file := range unmatched {
 			fmt.Printf("%d. %s\n", i+1, filepath.Base(file.Path))
 		}
@@ -260,6 +276,7 @@ func confirmRename() bool {
 		} else if response == "no" || response == "n" {
 			return false
 		}
+
 		fmt.Println("Please answer 'yes' or 'no'.")
 	}
 }
@@ -273,6 +290,7 @@ func renamePairs(pairs []FilePair, animeName string) {
 			pair.Video.Episode,
 			pair.Video.Extension,
 		)
+
 		newSubtitleName := fmt.Sprintf(
 			"%s - S%02dE%02d%s",
 			animeName,
@@ -291,6 +309,7 @@ func renamePairs(pairs []FilePair, animeName string) {
 
 func renameFile(oldPath, newPath string) {
 	err := os.Rename(oldPath, newPath)
+
 	if err != nil {
 		fmt.Printf("Error renaming file %s to %s: %v\n", oldPath, newPath, err)
 	} else {
