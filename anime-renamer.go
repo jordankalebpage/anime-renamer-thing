@@ -1,109 +1,283 @@
 // anime-renamer.go
-// this is a simple program that renames anime videos and subtitle files so mpv can fuzzy find the subtitles and auto load them
+// this intention of this program is that renames anime videos and subtitle files
+// so mpv can fuzzy find the subtitles and auto load them.
 // it assumes the videos and subtitles are in the same folder
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
+type FileInfo struct {
+	Path      string
+	Season    int
+	Episode   int
+	Extension string
+}
+
+type FilePair struct {
+	Video    FileInfo
+	Subtitle FileInfo
+}
+
 func main() {
-	folderPath := ""
-	fmt.Println("Enter the path to the folder containing the videos and subtitles:")
-	fmt.Scanln(&folderPath)
-
+	folderPath := getUserInputLine(
+		"Enter the path to the folder containing the videos and subtitles:",
+	)
 	if folderPath == "" {
-		fmt.Println("Error: Folder path is empty")
-		fmt.Println("Press enter to exit...")
-		fmt.Scanln()
-		os.Exit(1)
+		exitWithError("Error: Folder path is empty")
 	}
 
-	// won't be used to find files, but will be used to rename files
-	animeName := ""
-	fmt.Println("Enter the name of the anime:")
-	fmt.Scanln(&animeName)
+	fmt.Printf("Debug: Folder path entered: %s\n", folderPath)
 
-	seasonEpisodeNamingConvention := ""
-	fmt.Println("Enter the season and episode naming convention")
-	fmt.Println("e.g., S#E#, S# E#, E#, S# - E#, etc.")
-	fmt.Scanln(&seasonEpisodeNamingConvention)
+	animeName := getUserInputLine("Enter the name of the anime:")
 
-	if seasonEpisodeNamingConvention == "" {
-		fmt.Println("Error: Season and episode naming convention is empty")
-		fmt.Println("Press enter to exit...")
-		fmt.Scanln()
-		os.Exit(1)
-	}
+	// Use a default flexible naming convention
+	namingConvention := "S#E#"
 
-	seasonEpisodeSubtitleNamingConvention := ""
-	fmt.Println("Enter the season and episode naming convention for subtitles")
-	fmt.Println("e.g., S#E#, S# E#, E#, S# - E#, etc.")
-	fmt.Scanln(&seasonEpisodeSubtitleNamingConvention)
+	fmt.Printf("Debug: Using flexible naming convention: %s\n", namingConvention)
 
-	if seasonEpisodeSubtitleNamingConvention == "" {
-		fmt.Println("Error: Season and episode naming convention for subtitles is empty")
-		fmt.Println("Press enter to exit...")
-		fmt.Scanln()
-		os.Exit(1)
-	}
+	videoFiles := findFiles(folderPath, []string{".mkv", ".mp4", ".avi"}, namingConvention)
+	subtitleFiles := findFiles(folderPath, []string{".srt", ".ass"}, namingConvention)
 
-	videoExtensions := []string{".mkv", ".mp4", ".avi"}
-	var videoFiles []string
+	fmt.Printf(
+		"Debug: Found %d video files and %d subtitle files\n",
+		len(videoFiles),
+		len(subtitleFiles),
+	)
 
-	for _, ext := range videoExtensions {
-		files, err := filepath.Glob(
-			filepath.Join(folderPath, "*"+seasonEpisodeNamingConvention+"*"+ext),
+	if len(videoFiles) == 0 && len(subtitleFiles) == 0 {
+		exitWithError(
+			"Error: No video or subtitle files found. Please check the folder path and naming conventions.",
 		)
-
-		if err != nil {
-			fmt.Println("Error: Failed to find video files in folder")
-			fmt.Println("Press enter to exit...")
-			fmt.Scanln()
-			os.Exit(1)
-		}
-
-		videoFiles = append(videoFiles, files...)
 	}
 
-	subtitleExtensions := []string{".srt", ".ass"}
-	var subtitleFiles []string
-
-	for _, ext := range subtitleExtensions {
-		files, err := filepath.Glob(
-			filepath.Join(folderPath, "*"+seasonEpisodeSubtitleNamingConvention+"*"+ext),
-		)
-
-		if err != nil {
-			fmt.Println("Error: Failed to find subtitle files in folder")
-			fmt.Println("Press enter to exit...")
-			fmt.Scanln()
-			os.Exit(1)
-		}
-
-		subtitleFiles = append(subtitleFiles, files...)
-	}
-
-	// warn user if the counts are different
 	if len(videoFiles) != len(subtitleFiles) {
-		fmt.Println("Number of video files does not match number of subtitle files")
+		fmt.Println("Warning: Number of video files does not match number of subtitle files")
+		fmt.Printf(
+			"Found %d video files and %d subtitle files\n",
+			len(videoFiles),
+			len(subtitleFiles),
+		)
 		fmt.Println("Press enter to continue or ctrl+c to exit...")
 		fmt.Scanln()
 	}
 
-	// the idea is to create pairs of video and subtitle files and
-	// warn the user if there's an empty component in the pair
-	// (i.e., there's a video or a subtitle without a matching counterpart)
+	pairs, unmatched := createFilePairs(videoFiles, subtitleFiles)
+	displayPairsAndUnmatched(pairs, unmatched)
 
-	// also, if either the video or subtitle naming convention has a Season number,
-	// and the other doesn't, we need to break it down into episode count
-	// (e.g., there's 24 total episodes, and the subtitle file has "E24" in it, but the corresponding video file is "S02E12" or something)
+	if confirmRename() {
+		renamePairs(pairs, animeName)
+	} else {
+		fmt.Println("Renaming cancelled.")
+	}
 
-	// TODO
-
-	// pause and wait for user input before exiting
 	fmt.Println("All done :) ありがとうございます！")
+	fmt.Println("Press enter to exit...")
 	fmt.Scanln()
+}
+
+func getUserInputLine(prompt string) string {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println(prompt)
+	input, _ := reader.ReadString('\n')
+	return strings.TrimSpace(input)
+}
+
+func exitWithError(message string) {
+	fmt.Println(message)
+	fmt.Println("Press enter to exit...")
+	fmt.Scanln()
+	os.Exit(1)
+}
+
+func findFiles(folderPath string, extensions []string, namingConvention string) []FileInfo {
+	var files []FileInfo
+	extensionSet := make(map[string]bool)
+	for _, ext := range extensions {
+		extensionSet[ext] = true
+	}
+
+	pattern := createFlexiblePattern(namingConvention)
+
+	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Printf("Error accessing path %q: %v\n", path, err)
+			return nil
+		}
+		if !info.IsDir() {
+			ext := filepath.Ext(path)
+			if extensionSet[ext] {
+				baseName := filepath.Base(path)
+				if pattern.MatchString(baseName) {
+					fmt.Printf("Debug: Matched file: %s\n", baseName)
+					season, episode := extractSeasonAndEpisode(baseName)
+					fmt.Printf("Debug: Extracted Season: %d, Episode: %d\n", season, episode)
+					files = append(files, FileInfo{
+						Path:      path,
+						Season:    season,
+						Episode:   episode,
+						Extension: ext,
+					})
+				} else {
+					fmt.Printf("Debug: File not matched: %s\n", baseName)
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		fmt.Printf("Error walking the path %q: %v\n", folderPath, err)
+	}
+
+	return files
+}
+
+func extractSeasonAndEpisode(filename string) (int, int) {
+	seasonStr := ""
+	episodeStr := ""
+
+	// Handle S1 - ## format (for video files)
+	seasonEpisodePattern := regexp.MustCompile(`S(\d+)\s*-\s*(\d+)`)
+	if match := seasonEpisodePattern.FindStringSubmatch(filename); len(match) > 2 {
+		seasonStr = match[1]
+		episodeStr = match[2]
+	}
+
+	// Handle E## format (for subtitle files)
+	if episodeStr == "" {
+		episodePattern := regexp.MustCompile(`E(\d+)`)
+		if match := episodePattern.FindStringSubmatch(filename); len(match) > 1 {
+			episodeStr = match[1]
+		}
+	}
+
+	// If still not found, look for standalone numbers at the end
+	if episodeStr == "" {
+		standalonePattern := regexp.MustCompile(`(\d+)(?:\s*\[[A-Fa-f0-9]+\])?$`)
+		if match := standalonePattern.FindStringSubmatch(filename); len(match) > 1 {
+			episodeStr = match[1]
+		}
+	}
+
+	season, _ := strconv.Atoi(seasonStr)
+	episode, _ := strconv.Atoi(episodeStr)
+
+	// If no season found, default to 1
+	if season == 0 {
+		season = 1
+	}
+
+	return season, episode
+}
+
+func createFlexiblePattern(namingConvention string) *regexp.Regexp {
+	patternStr := strings.ReplaceAll(namingConvention, "#", `\d+`)
+	patternStr = strings.ReplaceAll(patternStr, "S", `S?`)
+	patternStr = strings.ReplaceAll(patternStr, "E", `E?`)
+	patternStr = fmt.Sprintf(`(%s|\d+)`, patternStr)
+	return regexp.MustCompile(patternStr)
+}
+
+func createFilePairs(videoFiles, subtitleFiles []FileInfo) ([]FilePair, []FileInfo) {
+	pairs := []FilePair{}
+	unmatched := []FileInfo{}
+	subtitleMap := make(map[int]FileInfo)
+
+	for _, subtitle := range subtitleFiles {
+		key := subtitle.Season*1000 + subtitle.Episode
+		subtitleMap[key] = subtitle
+	}
+
+	for _, video := range videoFiles {
+		key := video.Season*1000 + video.Episode
+		if subtitle, exists := subtitleMap[key]; exists {
+			pairs = append(pairs, FilePair{Video: video, Subtitle: subtitle})
+			delete(subtitleMap, key)
+		} else {
+			unmatched = append(unmatched, video)
+		}
+	}
+
+	for _, subtitle := range subtitleMap {
+		unmatched = append(unmatched, subtitle)
+	}
+
+	return pairs, unmatched
+}
+
+func displayPairsAndUnmatched(pairs []FilePair, unmatched []FileInfo) {
+	fmt.Println("\nMatched pairs:")
+	for i, pair := range pairs {
+		fmt.Printf(
+			"%d. Video: %s\n   Subtitle: %s\n",
+			i+1,
+			filepath.Base(pair.Video.Path),
+			filepath.Base(pair.Subtitle.Path),
+		)
+	}
+
+	if len(unmatched) > 0 {
+		fmt.Println("\nUnmatched files:")
+		for i, file := range unmatched {
+			fmt.Printf("%d. %s\n", i+1, filepath.Base(file.Path))
+		}
+	}
+}
+
+func confirmRename() bool {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("\nDo you want to proceed with renaming? (yes/no): ")
+		response, _ := reader.ReadString('\n')
+		response = strings.ToLower(strings.TrimSpace(response))
+
+		if response == "yes" || response == "y" {
+			return true
+		} else if response == "no" || response == "n" {
+			return false
+		}
+		fmt.Println("Please answer 'yes' or 'no'.")
+	}
+}
+
+func renamePairs(pairs []FilePair, animeName string) {
+	for _, pair := range pairs {
+		newVideoName := fmt.Sprintf(
+			"%s - S%02dE%02d%s",
+			animeName,
+			pair.Video.Season,
+			pair.Video.Episode,
+			pair.Video.Extension,
+		)
+		newSubtitleName := fmt.Sprintf(
+			"%s - S%02dE%02d%s",
+			animeName,
+			pair.Subtitle.Season,
+			pair.Subtitle.Episode,
+			pair.Subtitle.Extension,
+		)
+
+		renameFile(pair.Video.Path, filepath.Join(filepath.Dir(pair.Video.Path), newVideoName))
+		renameFile(
+			pair.Subtitle.Path,
+			filepath.Join(filepath.Dir(pair.Subtitle.Path), newSubtitleName),
+		)
+	}
+}
+
+func renameFile(oldPath, newPath string) {
+	err := os.Rename(oldPath, newPath)
+	if err != nil {
+		fmt.Printf("Error renaming file %s to %s: %v\n", oldPath, newPath, err)
+	} else {
+		fmt.Printf("Renamed: %s -> %s\n", oldPath, newPath)
+	}
 }
