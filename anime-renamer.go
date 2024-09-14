@@ -18,7 +18,17 @@ The program will try to find the episode number in the following order:
 
 3. E01
 
-4. 01 or 001 at the end or before space
+4. - 01
+
+5. 01 or 001 at the end or before space
+
+If season number isn't found in either the video or subtitle file name,
+it will normalize to only use episode number.
+e.g., if season 1 has 12 episodes, and season 2 has 12 episodes,
+then the file names will be E1..E24
+
+If season number *is* found in both the video and subtitle file name,
+then season number will be retained.
 */
 package main
 
