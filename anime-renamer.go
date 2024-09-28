@@ -193,8 +193,12 @@ func extractSeasonAndEpisode(filename string) (int, int) {
 		regex                     *regexp.Regexp
 		seasonIndex, episodeIndex int
 	}{
-		{regexp.MustCompile(`S(\d+)\s*-\s*(\d+)`), 1, 2},  // S1 - 01
-		{regexp.MustCompile(`S(\d+)E(\d+)`), 1, 2},        // S1E01
+		{regexp.MustCompile(`S(\d+)\s*-\s*(\d+)`), 1, 2}, // S1 - 01
+		{
+			regexp.MustCompile(`S(\d+)(?:\s|E)(\d+)`),
+			1,
+			2,
+		}, // S1E01 or S01E01 or S1 01 etc
 		{regexp.MustCompile(`E(\d+)`), 0, 1},              // E01
 		{regexp.MustCompile(`\s-\s(\d+)`), 0, 1},          // - 01
 		{regexp.MustCompile(`\s(\d{2,3})(?:\s|$)`), 0, 1}, // 01 or 001 at the end or before space
